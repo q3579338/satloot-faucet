@@ -11,6 +11,7 @@ Defence layers (all self-contained):
 WeChat (PushPlus) alert when the faucet runs dry or the daily cap is hit.
 """
 import json, os, time, sqlite3, secrets, hmac, hashlib, ipaddress, threading
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 import requests
 from flask import Flask, request, jsonify, render_template
@@ -22,6 +23,7 @@ from bit.transaction import address_to_scriptpubkey
 BASE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE, "config.json")
 DB_PATH = os.path.join(BASE, "faucet.db")
+LOCK_PATH = os.path.join(BASE, "payout.lock")   # cross-process payout mutex
 
 CN_TZ = timezone(timedelta(hours=8))   # daily cap resets at 00:00 Beijing time (UTC+8)
 
@@ -176,6 +178,35 @@ def maybe_alert(con, kind, cooldown, title, content):
     con.execute("INSERT OR REPLACE INTO alerts(kind, ts) VALUES(?,?)", (kind, now))
     con.commit()
     wechat_push(title, content)
+
+# ---------------------------------------------------------------- payout mutex
+class PayoutBusy(Exception):
+    """Raised when the payout lock can't be acquired within the timeout."""
+
+@contextmanager
+def payout_lock(timeout_sec=25):
+    """Serialize the select-coins -> broadcast -> record critical section across
+    processes. Two gunicorn workers can otherwise read the same UTXO set and build
+    two txs spending the same input: one broadcast wins, the other is rejected with
+    'bad-txns-inputs-missingorspent' and the user sees a spurious send failure.
+    A dedicated SQLite file acts as the lock — BEGIN IMMEDIATE grabs its write lock,
+    and the connection's busy timeout makes a second worker wait rather than collide.
+    Holding it across the network calls is intentional: payouts are small and rare,
+    so serializing them costs nothing and removes the race entirely."""
+    con = sqlite3.connect(LOCK_PATH, timeout=timeout_sec)
+    try:
+        try:
+            con.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise PayoutBusy()
+        try:
+            yield
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+    finally:
+        con.close()
 
 # ---------------------------------------------------------------- helpers
 def client_ip():
@@ -420,75 +451,84 @@ def claim():
             con.commit(); add_strike(con, ip)
             return jsonify(ok=False, error=M(lang, "bad_addr")), 400
 
-        row = con.execute("SELECT ts FROM claims WHERE address=? ORDER BY id DESC LIMIT 1",
-                          (addr,)).fetchone()
-        if row and now - row["ts"] < CONFIG["address_cooldown_sec"]:
-            w = CONFIG["address_cooldown_sec"] - (now - row["ts"]); con.commit()
-            return jsonify(ok=False, error=M(lang, "addr_cd", h=w//3600, m=w%3600//60)), 429
-
-        row = con.execute("SELECT ts FROM claims WHERE ip=? ORDER BY id DESC LIMIT 1",
-                          (ip,)).fetchone()
-        if row and now - row["ts"] < CONFIG["ip_cooldown_sec"]:
-            w = CONFIG["ip_cooldown_sec"] - (now - row["ts"]); con.commit()
-            return jsonify(ok=False, error=M(lang, "ip_cd", m=w//60)), 429
-
-        snet = subnet_of(ip)
-        scnt = con.execute("SELECT COUNT(*) c FROM claims WHERE subnet=? AND ts>=?",
-                           (snet, now - CONFIG["subnet_window_sec"])).fetchone()["c"]
-        if scnt >= CONFIG["subnet_max_per_window"]:
-            con.commit()
-            return jsonify(ok=False, error=M(lang, "subnet")), 429
-
+        # Everything below reads the faucet's UTXO set and spends from it, and
+        # re-checks the per-address/IP/subnet cooldowns and the daily cap. Run it
+        # under the cross-process payout lock so two workers can't select the same
+        # coin (double-spend -> spurious send failure) or both clear a cooldown and
+        # pay the same address twice in the same instant.
         try:
-            rbal = NetworkAPI.get_balance_testnet(addr)
-            if rbal is not None and int(rbal) > CONFIG["max_recipient_balance_sat"]:
+            with payout_lock(timeout_sec=25):
+                row = con.execute("SELECT ts FROM claims WHERE address=? ORDER BY id DESC LIMIT 1",
+                                  (addr,)).fetchone()
+                if row and now - row["ts"] < CONFIG["address_cooldown_sec"]:
+                    w = CONFIG["address_cooldown_sec"] - (now - row["ts"]); con.commit()
+                    return jsonify(ok=False, error=M(lang, "addr_cd", h=w//3600, m=w%3600//60)), 429
+
+                row = con.execute("SELECT ts FROM claims WHERE ip=? ORDER BY id DESC LIMIT 1",
+                                  (ip,)).fetchone()
+                if row and now - row["ts"] < CONFIG["ip_cooldown_sec"]:
+                    w = CONFIG["ip_cooldown_sec"] - (now - row["ts"]); con.commit()
+                    return jsonify(ok=False, error=M(lang, "ip_cd", m=w//60)), 429
+
+                snet = subnet_of(ip)
+                scnt = con.execute("SELECT COUNT(*) c FROM claims WHERE subnet=? AND ts>=?",
+                                   (snet, now - CONFIG["subnet_window_sec"])).fetchone()["c"]
+                if scnt >= CONFIG["subnet_max_per_window"]:
+                    con.commit()
+                    return jsonify(ok=False, error=M(lang, "subnet")), 429
+
+                try:
+                    rbal = NetworkAPI.get_balance_testnet(addr)
+                    if rbal is not None and int(rbal) > CONFIG["max_recipient_balance_sat"]:
+                        con.commit()
+                        return jsonify(ok=False, error=M(lang, "rich")), 403
+                except Exception:
+                    pass
+
+                # daily hard cap (UTC+8)
+                if paid_today(con) + payout > CONFIG["daily_global_cap_sat"]:
+                    cap_btc = CONFIG["daily_global_cap_sat"] / 1e8
+                    maybe_alert(con, "daily_cap", 86400,
+                                "Satloot 水龙头今日额度已用完",
+                                f"## 💧 今日额度已发满\n\n**{cap_btc:.8f} tBTC** 的当日上限已达到。\n\n"
+                                f"次日 00:00 (UTC+8) 自动重置。\n\n{CONFIG.get('site_url','')}")
+                    return jsonify(ok=False, error=M(lang, "daily")), 503
+
+                try:
+                    KEY.get_unspents()
+                    bal = int(KEY.balance_as("satoshi"))
+                except Exception:
+                    con.commit()
+                    return jsonify(ok=False, error=M(lang, "bal_err"))
+                if bal - payout < CONFIG["min_reserve_sat"]:
+                    maybe_alert(con, "empty", 6 * 3600,
+                                "⚠️ Satloot 水龙头没币了",
+                                f"## ⚠️ 水龙头余额不足\n\n当前余额 **{bal/1e8:.8f} tBTC**,已无法继续发放。\n\n"
+                                f"请给热钱包充值:\n\n`{KEY.address}`\n\n{CONFIG.get('site_url','')}")
+                    con.commit()
+                    return jsonify(ok=False, error=M(lang, "low"))
+
+                try:
+                    # bit builds+signs; we broadcast via Esplora (bit's testnet3 broadcasters are dead)
+                    amount_btc = payout / 1e8
+                    raw = KEY.create_transaction([(addr, f"{amount_btc:.8f}", "btc")],
+                                                 fee=CONFIG["fee_sat_per_byte"], combine=False)
+                    txid = broadcast_tx(raw)
+                    if not txid:
+                        raise Exception("broadcast rejected by all endpoints")
+                except Exception as e:
+                    con.commit()
+                    return jsonify(ok=False, error=M(lang, "send_fail", e=str(e)[:160]))
+
+                con.execute("INSERT INTO claims(address, ip, subnet, amount_sat, txid, ts) VALUES(?,?,?,?,?,?)",
+                            (addr, ip, snet, payout, txid, now))
+                con.execute("DELETE FROM used_tokens WHERE exp < ?", (now,))
+                con.execute("DELETE FROM attempts WHERE ts < ?", (now - 120,))
                 con.commit()
-                return jsonify(ok=False, error=M(lang, "rich")), 403
-        except Exception:
-            pass
-
-        # daily hard cap (UTC+8)
-        if paid_today(con) + payout > CONFIG["daily_global_cap_sat"]:
-            cap_btc = CONFIG["daily_global_cap_sat"] / 1e8
-            maybe_alert(con, "daily_cap", 86400,
-                        "Satloot 水龙头今日额度已用完",
-                        f"## 💧 今日额度已发满\n\n**{cap_btc:.8f} tBTC** 的当日上限已达到。\n\n"
-                        f"次日 00:00 (UTC+8) 自动重置。\n\n{CONFIG.get('site_url','')}")
-            return jsonify(ok=False, error=M(lang, "daily")), 503
-
-        try:
-            KEY.get_unspents()
-            bal = int(KEY.balance_as("satoshi"))
-        except Exception:
-            con.commit()
-            return jsonify(ok=False, error=M(lang, "bal_err"))
-        if bal - payout < CONFIG["min_reserve_sat"]:
-            maybe_alert(con, "empty", 6 * 3600,
-                        "⚠️ Satloot 水龙头没币了",
-                        f"## ⚠️ 水龙头余额不足\n\n当前余额 **{bal/1e8:.8f} tBTC**,已无法继续发放。\n\n"
-                        f"请给热钱包充值:\n\n`{KEY.address}`\n\n{CONFIG.get('site_url','')}")
-            con.commit()
-            return jsonify(ok=False, error=M(lang, "low"))
-
-        try:
-            # bit builds+signs; we broadcast via Esplora (bit's testnet3 broadcasters are dead)
-            amount_btc = payout / 1e8
-            raw = KEY.create_transaction([(addr, f"{amount_btc:.8f}", "btc")],
-                                         fee=CONFIG["fee_sat_per_byte"], combine=False)
-            txid = broadcast_tx(raw)
-            if not txid:
-                raise Exception("broadcast rejected by all endpoints")
-        except Exception as e:
-            con.commit()
-            return jsonify(ok=False, error=M(lang, "send_fail", e=str(e)[:160]))
-
-        con.execute("INSERT INTO claims(address, ip, subnet, amount_sat, txid, ts) VALUES(?,?,?,?,?,?)",
-                    (addr, ip, snet, payout, txid, now))
-        con.execute("DELETE FROM used_tokens WHERE exp < ?", (now,))
-        con.execute("DELETE FROM attempts WHERE ts < ?", (now - 120,))
-        con.commit()
-        return jsonify(ok=True, txid=txid, amount_sat=payout,
-                       explorer=f"https://mempool.space/testnet/tx/{txid}")
+                return jsonify(ok=True, txid=txid, amount_sat=payout,
+                               explorer=f"https://mempool.space/testnet/tx/{txid}")
+        except PayoutBusy:
+            return jsonify(ok=False, error=M(lang, "busy")), 503
     finally:
         con.close()
 

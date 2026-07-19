@@ -1,6 +1,8 @@
 # ── secrets & runtime state — NEVER commit ──
 config.json          # contains the hot-wallet WIF, hmac_secret, pushplus_token
 faucet.db            # claim history + visitor IPs
+payout.lock          # cross-process payout mutex (runtime)
+payout.lock-journal
 *.key
 *.crt
 *.pem
