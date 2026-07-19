@@ -49,13 +49,27 @@ Leave `wif` / `hmac_secret` blank to auto-generate. Highlights:
 | `daily_global_cap_sat` | daily payout cap (resets 00:00 UTC+8) | 10000000 |
 | `pushplus_token` | WeChat push token (optional) | "" |
 | `trust_proxy` | read real client IP from `X-Forwarded-For` (behind a proxy) | true |
+| `behind_cloudflare` | also trust `CF-Connecting-IP` — **only** enable behind Cloudflare (see below) | false |
 
 ## Deployment (reverse proxy)
 
-Run the app on `127.0.0.1:8811` and put nginx / Caddy / Apache in front. Behind
-Cloudflare, restore the real client IP from `CF-Connecting-IP` (nginx
-`ngx_http_realip_module`) so the per-IP limits work. HTTPS via Let's Encrypt /
-Cloudflare. `deploy.py` is a one-shot nginx + certbot deployer for reference.
+Run the app on `127.0.0.1:8811` and put nginx / Caddy / Apache in front. HTTPS via
+Let's Encrypt or Cloudflare. `deploy.py` is a one-shot nginx + certbot deployer for
+reference.
+
+The per-IP / per-subnet limits are only as trustworthy as the client IP the app
+sees, so make sure your proxy sets it correctly:
+
+- **No Cloudflare** — keep `behind_cloudflare: false` (the default). Your proxy
+  should overwrite `X-Forwarded-For` with the real connecting IP (nginx:
+  `proxy_set_header X-Forwarded-For $remote_addr;`). Leave the flag off: the app
+  ignores `CF-Connecting-IP`, which would otherwise be a client-forgeable header
+  and let an attacker dodge the per-IP limit.
+- **Behind Cloudflare** — set `behind_cloudflare: true`, and configure nginx's
+  `ngx_http_realip_module` (`set_real_ip_from` the Cloudflare ranges +
+  `real_ip_header CF-Connecting-IP`) and overwrite the header
+  (`proxy_set_header CF-Connecting-IP $remote_addr;`) so it can't be spoofed by
+  hitting the origin directly. `deploy.py` wires all of this up for you.
 
 ## Security notes
 

@@ -8,6 +8,8 @@
   "site_title": "Satloot",
   "return_address": "",
   "trust_proxy": true,
+  "behind_cloudflare": false,
+  "_behind_cloudflare_note": "Set true ONLY if served behind Cloudflare with nginx real_ip configured (see deploy.py). It makes the app trust the CF-Connecting-IP header for per-IP limits; leaving it false is the safe default for any other setup.",
   "pow_bits": 17,
   "challenge_ttl_sec": 600,
   "ip_cooldown_sec": 86400,

@@ -19,6 +19,18 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE = "/opt/btc_faucet"
 DOMAIN_DEFAULT = "faucet.satloot.com"
 
+# Cloudflare edge ranges (https://www.cloudflare.com/ips). nginx only honours the
+# CF-Connecting-IP header for requests that actually originate from these — so the
+# real-visitor IP cannot be forged by hitting the origin directly.
+CF_IPS = [
+    "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+    "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+    "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+    "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+    "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32",
+    "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+]
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__); sys.exit(1)
@@ -59,6 +71,11 @@ def main():
     print("== 4. first run to generate config + hot wallet ==")
     # start once to create config.json (auto-generates WIF), then stop
     run(f"cd {REMOTE} && timeout 8 ./venv/bin/python -c \"import app\" 2>&1 | grep -i deposit || true")
+    # this deployer always serves behind Cloudflare (realip vhost below), so the app
+    # may trust CF-Connecting-IP for its per-IP limits
+    run(f"cd {REMOTE} && ./venv/bin/python -c \""
+        "import json; p='config.json'; c=json.load(open(p)); c['behind_cloudflare']=True; "
+        "json.dump(c, open(p,'w'), indent=2)\"")
     wif_addr = run(f"cd {REMOTE} && ./venv/bin/python -c \"import json,app; print(app.KEY.address)\"").strip()
 
     print("== 5. systemd service ==")
@@ -79,13 +96,23 @@ WantedBy=multi-user.target
     run("systemctl daemon-reload && systemctl enable --now btcfaucet && sleep 2 && systemctl is-active btcfaucet")
 
     print("== 6. nginx vhost ==")
+    realip = "\n".join(f"    set_real_ip_from {r};" for r in CF_IPS)
     vhost = f"""server {{
     listen 80;
     server_name {domain};
+
+    # Trust Cloudflare's edges so $remote_addr becomes the real visitor IP.
+{realip}
+    real_ip_header CF-Connecting-IP;
+
     location / {{
         proxy_pass http://127.0.0.1:8811;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+        # Overwrite (never pass through) so a direct-to-origin request cannot
+        # forge this header — the app trusts CF-Connecting-IP for rate limits.
+        proxy_set_header CF-Connecting-IP $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
     }}
 }}

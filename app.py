@@ -34,6 +34,7 @@ DEFAULT_CONFIG = {
     "site_title": "Satloot",
     "return_address": "",
     "trust_proxy": True,
+    "behind_cloudflare": False,             # only trust CF-Connecting-IP when served behind Cloudflare
     "pow_bits": 17,
     "challenge_ttl_sec": 600,
     "ip_cooldown_sec": 86400,
@@ -179,6 +180,15 @@ def maybe_alert(con, kind, cooldown, title, content):
 # ---------------------------------------------------------------- helpers
 def client_ip():
     if CONFIG.get("trust_proxy"):
+        # CF-Connecting-IP is a plain header any client can forge, so only trust it
+        # when explicitly served behind Cloudflare. In that setup nginx (see deploy.py)
+        # validates the request really came from a Cloudflare edge and overwrites the
+        # header with the realip-resolved visitor IP, making it unspoofable. Without
+        # this flag we ignore it and fall back to the first X-Forwarded-For hop.
+        if CONFIG.get("behind_cloudflare"):
+            cf = request.headers.get("CF-Connecting-IP", "").strip()
+            if cf:
+                return cf
         xff = request.headers.get("X-Forwarded-For", "")
         if xff:
             return xff.split(",")[0].strip()
