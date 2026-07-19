@@ -64,6 +64,19 @@ Cloudflare. `deploy.py` is a one-shot nginx + certbot deployer for reference.
 - All abuse-facing error responses return HTTP 200 with a JSON body so a proxy/CDN
   never masks the real reason.
 
+## Author & attribution
+
+**Satloot** — an original, self-built open-source project.
+
+- Author: **Satloot** · admin@satloot.com
+- Live demo: https://faucet.satloot.com
+- This is my own original work. You're free to use, fork, and self-host it under
+  the MIT license below; a star or a link back is appreciated. Please don't
+  claim it as your own.
+
+> 本项目为 **Satloot** 原创、自建的开源比特币 testnet3 水龙头。基于 MIT 协议开源,
+> 欢迎自由使用、二次开发与自建部署;请勿声称为你自己的原创作品。作者:Satloot(admin@satloot.com)。
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT © 2026 Satloot — see [LICENSE](LICENSE).
