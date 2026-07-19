@@ -1,0 +1,22 @@
+# ── secrets & runtime state — NEVER commit ──
+config.json          # contains the hot-wallet WIF, hmac_secret, pushplus_token
+faucet.db            # claim history + visitor IPs
+*.key
+*.crt
+*.pem
+*.evidence
+server.log
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+
+# local key backups / anything with "backup" in the name
+*backup*
+*备份*
+HOTWALLET*
+keys_scan*

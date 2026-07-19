@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} · Bitcoin testnet3 faucet</title>
+<style>
+/* Hallmark · macrostructure: Stat-Led (wide, two-column) · genre: modern-minimal · tone: utilitarian-technical
+ * theme: light (white paper · ink · bitcoin-orange accent · mono-technical) · anchor hue: warm
+ * pre-emit critique: P4 H5 E4 S5 R4 V4 · contrast: pass · states: default·hover·focus·active·disabled
+ */
+:root{
+  --color-bg:oklch(98.6% 0.003 95); --color-paper:oklch(100% 0 0); --color-paper-2:oklch(97.5% 0.004 95);
+  --color-ink:oklch(24% 0.012 260); --color-ink-2:oklch(44% 0.012 260); --color-muted:oklch(58% 0.010 260);
+  --color-line:oklch(92% 0.004 260); --color-line-2:oklch(88% 0.005 260);
+  --color-accent:oklch(72% 0.165 58); --color-accent-ink:oklch(52% 0.145 52); --color-accent-wash:oklch(96.5% 0.03 70);
+  --color-in:oklch(52% 0.13 150); --color-in-wash:oklch(96% 0.04 155);
+  --color-out:oklch(52% 0.14 250);
+  --color-ok:oklch(52% 0.12 150); --color-ok-wash:oklch(96% 0.04 155);
+  --color-err:oklch(55% 0.18 27); --color-err-wash:oklch(96% 0.04 27);
+  --color-focus:oklch(64% 0.17 58);
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --text-xs:.78rem; --text-sm:.88rem; --text-base:1rem; --text-lg:1.15rem; --text-xl:1.4rem; --text-2xl:1.9rem; --text-3xl:2.7rem;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px; --space-7:48px; --space-8:64px;
+  --radius:12px; --radius-sm:8px; --ease-out:cubic-bezier(.22,.61,.36,1); --dur:.18s;
+  --shadow:0 1px 2px rgba(20,22,26,.04),0 4px 16px -8px rgba(20,22,26,.10);
+  --wrap:1120px;
+}
+*{box-sizing:border-box}
+html,body{overflow-x:clip}
+body{margin:0;background:var(--color-bg);color:var(--color-ink);font-family:var(--font-sans);font-size:var(--text-base);line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--color-accent-ink);text-decoration:none}
+a:hover{text-decoration:underline}
+.mono{font-family:var(--font-mono)}
+
+/* masthead — full width */
+.masthead{position:sticky;top:0;z-index:20;background:color-mix(in oklch,var(--color-paper) 90%,transparent);backdrop-filter:saturate(1.2) blur(8px);border-bottom:1px solid var(--color-line)}
+.mast-in{max-width:var(--wrap);margin:0 auto;padding:var(--space-3) var(--space-6);display:flex;align-items:center;gap:var(--space-5)}
+.brand{display:flex;align-items:center;gap:var(--space-2);color:var(--color-ink);font-weight:700;letter-spacing:-.02em;font-size:var(--text-lg)}
+.brand:hover{text-decoration:none}
+.brand .btc{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:7px;background:var(--color-accent);color:#fff;font-weight:800;font-size:.95rem}
+.brand .wordmark{font-weight:700}
+.brand .wordmark::first-letter{font-size:1.45em;font-weight:800;color:var(--color-accent-ink);letter-spacing:-.03em}
+.brand .net{font-family:var(--font-mono);font-size:var(--text-xs);font-weight:600;color:var(--color-accent-ink);background:var(--color-accent-wash);border:1px solid color-mix(in oklch,var(--color-accent) 30%,var(--color-line));padding:1px 7px;border-radius:20px}
+.mnav{display:flex;align-items:center;gap:var(--space-4);margin-left:var(--space-2)}
+.mnav > a{display:inline-flex;align-items:center;line-height:1}
+.fdrop summary{line-height:1}
+.mnav a{color:var(--color-ink-2);font-size:var(--text-sm);font-weight:500}
+.mnav a:hover{color:var(--color-accent-ink);text-decoration:none}
+.lang{margin-left:auto;font-family:var(--font-mono);font-size:var(--text-sm)}
+.lang a{cursor:pointer;color:var(--color-muted);padding:2px 4px;border-radius:5px}
+.lang a:hover{color:var(--color-ink);text-decoration:none}
+.lang a.on{color:var(--color-accent-ink);font-weight:700}
+.lang .sep{color:var(--color-line-2)}
+
+/* layout — wide */
+main{max-width:var(--wrap);margin:0 auto;padding:var(--space-7) var(--space-6) var(--space-6)}
+.hero{margin-bottom:var(--space-6)}
+h1{font-size:var(--text-3xl);line-height:1.05;letter-spacing:-.03em;font-weight:800;margin:0 0 var(--space-3);overflow-wrap:anywhere;min-width:0;max-width:16ch}
+h1 .hl{color:var(--color-accent-ink)}
+.lede{color:var(--color-ink-2);font-size:var(--text-lg);max-width:56ch;margin:0}
+
+/* stat band — full row */
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:var(--space-6);border:1px solid var(--color-line);border-radius:var(--radius);background:var(--color-paper);overflow:hidden}
+.stat{padding:var(--space-4) var(--space-5);border-left:1px solid var(--color-line)}
+.stat:first-child{border-left:0}
+.stat .k{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.06em;color:var(--color-muted);margin-bottom:var(--space-1)}
+.stat .v{font-family:var(--font-mono);font-size:var(--text-xl);font-weight:600;color:var(--color-ink);letter-spacing:-.01em;overflow-wrap:anywhere;min-width:0}
+.stat .v.accent{color:var(--color-accent-ink)}
+
+/* two-column body */
+.cols{display:grid;grid-template-columns:1.5fr 1fr;gap:var(--space-5);margin-top:var(--space-5);align-items:start}
+.card{background:var(--color-paper);border:1px solid var(--color-line);border-radius:var(--radius);padding:var(--space-5);box-shadow:var(--shadow)}
+.card + .card{margin-top:var(--space-5)}
+.card h2{font-size:var(--text-sm);text-transform:uppercase;letter-spacing:.06em;color:var(--color-muted);font-weight:600;margin:0 0 var(--space-3)}
+label.field{display:block;color:var(--color-ink-2);font-size:var(--text-sm);margin-bottom:var(--space-2);font-weight:500}
+input[type=text]{width:100%;padding:14px 16px;border-radius:var(--radius-sm);border:1px solid var(--color-line-2);background:var(--color-paper);color:var(--color-ink);font-size:var(--text-base);font-family:var(--font-mono)}
+input[type=text]::placeholder{color:var(--color-muted)}
+input[type=text]:hover{border-color:var(--color-muted)}
+input[type=text]:focus{outline:none;border-color:var(--color-accent);box-shadow:0 0 0 3px var(--color-accent-wash)}
+select#amount{width:100%;padding:13px 15px;border-radius:var(--radius-sm);border:1px solid var(--color-line-2);background:var(--color-paper);color:var(--color-ink);font-size:var(--text-base);font-family:var(--font-mono);cursor:pointer}
+select#amount:hover{border-color:var(--color-muted)}
+select#amount:focus{outline:none;border-color:var(--color-accent);box-shadow:0 0 0 3px var(--color-accent-wash)}
+button.go{margin-top:var(--space-3);width:100%;padding:15px;border:0;border-radius:var(--radius-sm);cursor:pointer;background:var(--color-accent);color:#fff;font-weight:700;font-size:var(--text-lg);font-family:var(--font-sans);transition:background var(--dur) var(--ease-out),transform var(--dur) var(--ease-out)}
+button.go:hover{background:var(--color-accent-ink)}
+button.go:active{transform:translateY(1px)}
+button.go:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+button.go:disabled{opacity:.6;cursor:not-allowed}
+.hint{font-size:var(--text-sm);color:var(--color-muted);margin:var(--space-3) 0 0}
+.bar{height:5px;background:var(--color-paper-2);border:1px solid var(--color-line);border-radius:4px;overflow:hidden;margin-top:var(--space-3);display:none}
+.bar>i{display:block;height:100%;width:0;background:var(--color-accent);transition:width .2s linear}
+.msg{margin-top:var(--space-3);padding:12px 15px;border-radius:var(--radius-sm);display:none;word-break:break-all;font-size:var(--text-sm)}
+.msg.ok{display:block;background:var(--color-ok-wash);border:1px solid color-mix(in oklch,var(--color-ok) 40%,var(--color-line));color:var(--color-ok)}
+.msg.err{display:block;background:var(--color-err-wash);border:1px solid color-mix(in oklch,var(--color-err) 40%,var(--color-line));color:var(--color-err)}
+.hp{position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}
+.abal{margin-top:var(--space-2);font-size:var(--text-sm);color:var(--color-muted);display:none}
+.abal.show{display:block}
+.abal b{font-family:var(--font-mono);color:var(--color-ink);font-weight:600}
+
+/* donate */
+.donate{display:flex;gap:var(--space-4);align-items:flex-start;flex-wrap:wrap}
+.donate .qr{flex:0 0 auto;background:#fff;border:1px solid var(--color-line);border-radius:var(--radius-sm);padding:var(--space-2);line-height:0}
+.donate .qr img{width:96px;height:96px;display:block}
+.donate .body{flex:1 1 180px;min-width:min(100%,180px)}
+a.addr{display:inline-block;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-ink);background:var(--color-paper-2);border:1px solid var(--color-line);border-radius:var(--radius-sm);padding:8px 11px;word-break:break-all;max-width:100%}
+a.addr:hover{border-color:var(--color-accent);color:var(--color-accent-ink);text-decoration:none}
+
+/* faucet dropdown (nav) */
+.fdrop{position:relative;display:flex;align-items:center;align-self:center}
+.fdrop summary{list-style:none;cursor:pointer;color:var(--color-ink-2);font-size:var(--text-sm);font-weight:500;
+  display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.fdrop summary::-webkit-details-marker{display:none}
+.fdrop summary::after{content:"▾";font-size:.75em;color:var(--color-muted);transition:transform var(--dur) var(--ease-out)}
+.fdrop summary:hover{color:var(--color-accent-ink)}
+.fdrop[open] summary{color:var(--color-accent-ink)}
+.fdrop[open] summary::after{transform:rotate(180deg)}
+.fdrop-menu{position:absolute;top:calc(100% + 12px);left:0;min-width:230px;background:var(--color-paper);
+  border:1px solid var(--color-line);border-radius:var(--radius-sm);box-shadow:var(--shadow);padding:6px;z-index:30}
+.fdrop-menu a{display:flex;align-items:center;justify-content:space-between;gap:var(--space-4);padding:9px 12px;
+  border-radius:6px;color:var(--color-ink);font-family:var(--font-mono);font-size:var(--text-sm)}
+.fdrop-menu a:hover{background:var(--color-paper-2);color:var(--color-accent-ink);text-decoration:none}
+.fdrop-menu a .tag{font-size:var(--text-xs);color:var(--color-muted);font-family:var(--font-sans)}
+
+/* transactions — full width */
+.txwrap{margin-top:var(--space-5)}
+.txhead{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-3)}
+.txhead h2{font-size:var(--text-sm);text-transform:uppercase;letter-spacing:.06em;color:var(--color-muted);font-weight:600;margin:0}
+.txhead .live{font-size:var(--text-xs);color:var(--color-muted)}
+.txlist{border:1px solid var(--color-line);border-radius:var(--radius);overflow:hidden;background:var(--color-paper)}
+.tx{display:grid;grid-template-columns:1fr auto;gap:var(--space-1) var(--space-4);padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--color-line);border-left:3px solid transparent}
+.tx:last-child{border-bottom:0}
+.tx.in{border-left-color:var(--color-in)}
+.tx.out{border-left-color:var(--color-out)}
+.tx .txh{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-accent-ink);overflow-wrap:anywhere;min-width:0}
+.tx .amt{font-family:var(--font-mono);font-size:var(--text-sm);font-weight:700;text-align:right;white-space:nowrap}
+.tx.in .amt{color:var(--color-in)}
+.tx.out .amt{color:var(--color-out)}
+.tx .meta{grid-column:1;font-size:var(--text-xs);color:var(--color-muted)}
+.tx .conf{grid-column:2;text-align:right;font-size:var(--text-xs);color:var(--color-muted);white-space:nowrap}
+.txempty{padding:var(--space-5);color:var(--color-muted);font-size:var(--text-sm)}
+
+/* footer */
+.foot{border-top:1px solid var(--color-line);background:var(--color-paper);margin-top:var(--space-7)}
+.foot-in{max-width:var(--wrap);margin:0 auto;padding:var(--space-6);display:flex;justify-content:space-between;gap:var(--space-5);flex-wrap:wrap;font-size:var(--text-sm);color:var(--color-muted)}
+.foot .src{display:flex;flex-direction:column;gap:6px}
+.foot .lbl{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.05em}
+
+@media(max-width:860px){
+  .cols{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:560px){
+  main{padding:var(--space-6) var(--space-4) var(--space-5)}
+  .mast-in,.foot-in{padding:var(--space-3) var(--space-4)}
+  .mnav > a{display:none}
+  .fdrop summary{font-size:var(--text-xs)}
+  .fdrop-menu{right:0;left:auto}
+  h1{font-size:var(--text-2xl)}
+  .stats{grid-template-columns:minmax(0,1fr)}
+  .stat{border-left:0;border-top:1px solid var(--color-line)}
+  .stat:first-child{border-top:0}
+}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="mast-in">
+    <a class="brand" href="/"><span class="btc">₿</span> <span class="wordmark">{{ title }}</span> <span class="net">testnet3</span></a>
+    <nav class="mnav">
+      <a href="#txs" data-en="Transactions" data-zh="交易记录"></a>
+      <details class="fdrop">
+        <summary data-en="Out of coins? Try these" data-zh="这里没币了?试试这些"></summary>
+        <div class="fdrop-menu">
+          <a href="https://bitcoinfaucet.uo1.net/" target="_blank" rel="noopener">bitcoinfaucet.uo1.net <span class="tag">testnet3</span></a>
+          <a href="https://coinfaucet.eu/en/btc-testnet/" target="_blank" rel="noopener">coinfaucet.eu <span class="tag">testnet3</span></a>
+          <a href="https://testnet.help/en/btcfaucet/testnet" target="_blank" rel="noopener">testnet.help <span class="tag">testnet4</span></a>
+          <a href="https://faucet.testnet4.dev/" target="_blank" rel="noopener">faucet.testnet4.dev <span class="tag">testnet4</span></a>
+        </div>
+      </details>
+    </nav>
+    <div class="lang">
+      <a id="lang-en" onclick="setLang('en')">EN</a> <span class="sep">/</span>
+      <a id="lang-zh" onclick="setLang('zh')">中文</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <h1 data-en='Free Bitcoin <span class="hl">testnet3</span> coins'
+        data-zh='免费领取比特币 <span class="hl">testnet3</span> 测试币'></h1>
+    <p class="lede"
+       data-en="For development and testing on Bitcoin's test network. These coins carry no real value."
+       data-zh="用于比特币测试网上的开发与测试。测试币不具有任何真实价值。"></p>
+    <div class="stats">
+      <div class="stat">
+        <div class="k" data-en="Faucet balance" data-zh="水龙头余额"></div>
+        <div class="v">{% if balance_sat is not none %}{{ '%.8f'|format(balance_sat/1e8) }}{% else %}—{% endif %}</div>
+      </div>
+      <div class="stat">
+        <div class="k" data-en="Per claim" data-zh="每次发放"></div>
+        <div class="v accent" id="perclaim">{{ '%.8f'|format(payout_sat/1e8) }}</div>
+      </div>
+      <div class="stat">
+        <div class="k" data-en="Daily quota left" data-zh="今日剩余额度"></div>
+        <div class="v">{{ '%.4f'|format(daily_remaining_sat/1e8) }}</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <!-- left: claim -->
+    <section class="card" id="claim">
+      <h2 data-en="Request coins" data-zh="领取测试币"></h2>
+      <label class="field" for="addr" data-en="Your testnet3 receiving address" data-zh="你的 testnet3 接收地址"></label>
+      <input id="addr" type="text" placeholder="tb1... / m / n / 2" autocomplete="off" spellcheck="false" oninput="checkBalance()">
+      <div id="abal" class="abal"></div>
+      <label class="field" style="margin-top:var(--space-4)" data-en="Amount" data-zh="领取数量"></label>
+      <select id="amount" onchange="updateAmount()">
+        <option value="10000">0.00010000 tBTC</option>
+        <option value="20000">0.00020000 tBTC</option>
+        <option value="30000">0.00030000 tBTC</option>
+        <option value="50000">0.00050000 tBTC (max)</option>
+      </select>
+      <div class="hp" aria-hidden="true"><label>Website</label><input type="text" id="hp" name="{{ honeypot_field }}" tabindex="-1" autocomplete="off"></div>
+      <button id="btn" class="go" onclick="claim()" data-en="Get test coins" data-zh="领取测试币"></button>
+      <div class="bar" id="bar"><i id="barfill"></i></div>
+      <div id="msg" class="msg"></div>
+      <p class="hint"
+         data-en="A quick in-browser proof-of-work (~1–3s) runs before each claim. Limit: once per day per IP and per address."
+         data-zh="领取前浏览器会做一次工作量证明验证(约 1–3 秒)。限制:同一 IP、同一地址,每天各一次。"></p>
+    </section>
+
+    <!-- right: donate + friends -->
+    <div>
+      <section class="card">
+        <h2 data-en="Send coins back 🙏" data-zh="回捐 🙏"></h2>
+        <div class="donate">
+          {% if return_qr %}<div class="qr"><img src="{{ return_qr }}" alt="donation QR"></div>{% endif %}
+          <div class="body">
+            <p class="hint" style="margin-top:0"
+               data-en="Scan or click to return coins:" data-zh="扫码或点击回捐:"></p>
+            <a class="addr" href="bitcoin:{{ return_address }}">{{ return_address }}</a>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- full-width on-chain transactions -->
+  <section class="txwrap" id="txs">
+    <div class="txhead">
+      <h2 data-en="On-chain transactions" data-zh="链上交易(全部转入 / 转出)"></h2>
+      <span class="live" data-en="live from the blockchain" data-zh="链上实时"></span>
+    </div>
+    <div class="txlist" id="txlist">
+      <div class="txempty" data-en="Loading…" data-zh="加载中…"></div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="foot-in">
+    <span data-en="Satloot · Bitcoin testnet3 faucet" data-zh="Satloot · 比特币测试网水龙头"></span>
+    <a href="mailto:admin@satloot.com" data-en="Contact: admin@satloot.com" data-zh="联系邮箱:admin@satloot.com"></a>
+    <a href="https://mempool.space/testnet/address/{{ faucet_address }}" target="_blank" rel="noopener"
+       data-en="Faucet wallet on-chain →" data-zh="水龙头钱包链上记录 →"></a>
+  </div>
+</footer>
+
+<script>
+let CHAL = {{ challenge|tojson }};
+let LANG = 'en';
+const FAUCET_ADDR = {{ faucet_address|tojson }};
+
+const T = {
+  solving:{en:'Verifying…', zh:'安全验证中…'},
+  sending:{en:'Sending…', zh:'发送中…'},
+  claim:  {en:'Get test coins', zh:'领取测试币'},
+  need_addr:{en:'Please enter a receiving address first.', zh:'请先填写接收地址。'},
+  neterr: {en:'Verification or network error, please retry.', zh:'验证或网络出错,请重试。'},
+  sent:   {en:'✅ Sent {a} tBTC.  ', zh:'✅ 已发送 {a} tBTC。 '},
+  txlbl:  {en:'View tx', zh:'查看交易'},
+  addr_ph:{en:'tb1... / m / n / 2', zh:'tb1... 或 m / n / 2 开头'},
+  notx:   {en:'No transactions yet.', zh:'暂无交易。'},
+  conf:   {en:'{n} conf', zh:'{n} 确认'},
+  pending:{en:'unconfirmed', zh:'待确认'},
+  incoming:{en:'in', zh:'转入'},
+  outgoing:{en:'out', zh:'转出'},
+};
+
+function applyI18n(){
+  document.querySelectorAll('[data-en]').forEach(el=>{
+    const v = el.getAttribute('data-'+LANG); if(v!==null) el.innerHTML = v;
+  });
+  document.getElementById('addr').placeholder = T.addr_ph[LANG];
+  const btn=document.getElementById('btn'); if(!btn.disabled) btn.textContent = T.claim[LANG];
+  document.getElementById('lang-en').classList.toggle('on', LANG==='en');
+  document.getElementById('lang-zh').classList.toggle('on', LANG==='zh');
+  document.documentElement.lang = LANG;
+  try{ localStorage.setItem('faucet_lang', LANG); }catch(e){}
+  renderTxs(); renderAbal();
+}
+function setLang(l){ LANG = (l==='zh')?'zh':'en'; applyI18n(); }
+
+/* ---- claim amount ---- */
+function updateAmount(){
+  const v=parseInt(document.getElementById('amount').value,10)||10000;
+  const el=document.getElementById('perclaim'); if(el) el.textContent=(v/1e8).toFixed(8);
+}
+
+/* ---- recipient address balance ---- */
+let lastAbal=null, balTimer=null;
+function renderAbal(){
+  const el=document.getElementById('abal'); if(!el) return;
+  if(lastAbal===null){ el.className='abal'; return; }
+  el.innerHTML=(LANG==='zh'?'该地址余额:':'Address balance: ')+'<b>'+(lastAbal/1e8).toFixed(8)+' tBTC</b>';
+  el.className='abal show';
+}
+function checkBalance(){
+  const addr=document.getElementById('addr').value.trim();
+  if(balTimer) clearTimeout(balTimer);
+  if(addr.length<20){ lastAbal=null; renderAbal(); return; }
+  balTimer=setTimeout(async()=>{
+    try{ const r=await fetch('/api/addrbalance?address='+encodeURIComponent(addr)); const d=await r.json();
+      lastAbal = d.ok ? d.balance_sat : null; renderAbal();
+    }catch(e){ lastAbal=null; renderAbal(); }
+  },600);
+}
+
+/* ---- transactions ---- */
+let TXS = null;
+function fmtTime(t){ if(!t) return '—'; const d=new Date(t*1000);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+    +' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function renderTxs(){
+  const box=document.getElementById('txlist'); if(!box) return;
+  if(TXS===null){ box.innerHTML='<div class="txempty">'+(LANG==='zh'?'加载中…':'Loading…')+'</div>'; return; }
+  if(!TXS.length){ box.innerHTML='<div class="txempty">'+T.notx[LANG]+'</div>'; return; }
+  box.innerHTML = TXS.map(t=>{
+    const inc = t.net_sat>=0;
+    const amt = (inc?'+':'') + (t.net_sat/1e8).toFixed(8);
+    const conf = t.confirmations>0 ? T.conf[LANG].replace('{n}',t.confirmations) : T.pending[LANG];
+    const dir = inc?T.incoming[LANG]:T.outgoing[LANG];
+    return '<div class="tx '+(inc?'in':'out')+'">'
+      +'<a class="txh" href="https://mempool.space/testnet/tx/'+t.txid+'" target="_blank" rel="noopener">'+t.txid+'</a>'
+      +'<span class="amt">'+amt+' tBTC</span>'
+      +'<span class="meta">'+dir+' · '+fmtTime(t.time)+'</span>'
+      +'<span class="conf">'+conf+'</span>'
+      +'</div>';
+  }).join('');
+}
+async function loadTxs(){
+  try{ const r=await fetch('/api/txs'); TXS=await r.json(); }catch(e){ TXS=[]; }
+  renderTxs();
+}
+
+/* ---- compact SHA-256 (sync, PoW) ---- */
+const SHA256=(function(){
+  const K=new Uint32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+  function rr(x,n){return (x>>>n)|(x<<(32-n));}
+  return function(msg){
+    const bytes=new TextEncoder().encode(msg);
+    const l=bytes.length; const bl=((l+8>>6)+1)<<6; const buf=new Uint8Array(bl);
+    buf.set(bytes); buf[l]=0x80;
+    const bits=l*8; const dv=new DataView(buf.buffer);
+    dv.setUint32(bl-4,bits>>>0); dv.setUint32(bl-8,Math.floor(bits/0x100000000));
+    let h0=0x6a09e667,h1=0xbb67ae85,h2=0x3c6ef372,h3=0xa54ff53a,h4=0x510e527f,h5=0x9b05688c,h6=0x1f83d9ab,h7=0x5be0cd19;
+    const w=new Uint32Array(64);
+    for(let i=0;i<bl;i+=64){
+      for(let t=0;t<16;t++) w[t]=dv.getUint32(i+t*4);
+      for(let t=16;t<64;t++){const s0=rr(w[t-15],7)^rr(w[t-15],18)^(w[t-15]>>>3);const s1=rr(w[t-2],17)^rr(w[t-2],19)^(w[t-2]>>>10);w[t]=(w[t-16]+s0+w[t-7]+s1)>>>0;}
+      let a=h0,b=h1,c=h2,d=h3,e=h4,f=h5,g=h6,h=h7;
+      for(let t=0;t<64;t++){const S1=rr(e,6)^rr(e,11)^rr(e,25);const ch=(e&f)^(~e&g);const t1=(h+S1+ch+K[t]+w[t])>>>0;const S0=rr(a,2)^rr(a,13)^rr(a,22);const mj=(a&b)^(a&c)^(b&c);const t2=(S0+mj)>>>0;h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;}
+      h0=(h0+a)>>>0;h1=(h1+b)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;h4=(h4+e)>>>0;h5=(h5+f)>>>0;h6=(h6+g)>>>0;h7=(h7+h)>>>0;
+    }
+    const H=[h0,h1,h2,h3,h4,h5,h6,h7];let out='';
+    for(const x of H) out+=('00000000'+(x>>>0).toString(16)).slice(-8);
+    return out;
+  };
+})();
+function lzbHex(hex){let n=0;for(const ch of hex){const v=parseInt(ch,16);if(v===0){n+=4;}else{n+=Math.clz32(v)-28;break;}}return n;}
+async function solvePow(token,bits,onProgress){
+  const expected=Math.pow(2,bits); let nonce=0; const t=token+':';
+  while(true){
+    for(let i=0;i<3000;i++){ if(lzbHex(SHA256(t+nonce))>=bits) return nonce; nonce++; }
+    if(onProgress) onProgress(Math.min(0.99,nonce/expected));
+    await new Promise(r=>setTimeout(r,0));
+  }
+}
+async function refreshChallenge(){ try{ const r=await fetch('/api/challenge'); CHAL=await r.json(); }catch(e){} }
+
+async function claim(){
+  const addr=document.getElementById('addr').value.trim();
+  const hp=document.getElementById('hp').value;
+  const btn=document.getElementById('btn'), msg=document.getElementById('msg');
+  const bar=document.getElementById('bar'), fill=document.getElementById('barfill');
+  msg.className='msg'; msg.style.display='none';
+  if(!addr){ show(false,T.need_addr[LANG]); return; }
+  btn.disabled=true; btn.textContent=T.solving[LANG];
+  bar.style.display='block'; fill.style.width='0%';
+  try{
+    const nonce=await solvePow(CHAL.token,CHAL.bits,p=>{fill.style.width=(p*100).toFixed(0)+'%';});
+    fill.style.width='100%'; btn.textContent=T.sending[LANG];
+    const body=new URLSearchParams();
+    body.set('address',addr); body.set('token',CHAL.token); body.set('sig',CHAL.sig);
+    body.set('nonce',String(nonce)); body.set('lang',LANG); body.set('{{ honeypot_field }}',hp);
+    body.set('amount_sat', document.getElementById('amount').value);
+    const r=await fetch('/api/claim',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+    const d=await r.json();
+    if(d.ok){
+      show(true, T.sent[LANG].replace('{a}',(d.amount_sat/1e8).toFixed(8))
+        +'<a href="'+d.explorer+'" target="_blank" rel="noopener">'+T.txlbl[LANG]+' →</a>');
+      setTimeout(loadTxs, 1500);
+      setTimeout(checkBalance, 2500);
+    }else{ show(false, d.error||T.neterr[LANG]); }
+  }catch(e){ show(false,T.neterr[LANG]); }
+  await refreshChallenge();
+  bar.style.display='none'; btn.disabled=false; btn.textContent=T.claim[LANG];
+}
+function show(ok,html){ const m=document.getElementById('msg'); m.className='msg '+(ok?'ok':'err'); m.innerHTML=html; m.style.display='block'; }
+
+// close faucet dropdown on outside click
+document.addEventListener('click', e=>{
+  document.querySelectorAll('details.fdrop[open]').forEach(d=>{ if(!d.contains(e.target)) d.removeAttribute('open'); });
+});
+
+(function(){
+  let l=null; try{ l=localStorage.getItem('faucet_lang'); }catch(e){}
+  if(!l){ l=(navigator.language||'en').toLowerCase().startsWith('zh')?'zh':'en'; }
+  setLang(l);
+  loadTxs();
+})();
+</script>
+</body>
+</html>
