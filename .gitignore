@@ -1,8 +1,21 @@
 # ── secrets & runtime state — NEVER commit ──
-config.json          # contains the hot-wallet WIF, hmac_secret, pushplus_token
-faucet.db            # claim history + visitor IPs
-payout.lock          # cross-process payout mutex (runtime)
+# NOTE: gitignore has no trailing comments — a "#" after a pattern becomes part of
+# the pattern, so it silently matches nothing. Keep every comment on its own line.
+
+# hot-wallet WIF, hmac_secret, pushplus_token
+config.json
+# claim history + visitor IPs
+faucet.db
+faucet.db-wal
+faucet.db-shm
+# cross-process mutexes (runtime)
+payout.lock
 payout.lock-journal
+ln.lock
+ln.lock-journal
+# LND macaroon + tls.cert copied in at deploy time
+lnd/
+*.macaroon
 *.key
 *.crt
 *.pem
