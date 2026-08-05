@@ -160,6 +160,14 @@ a.addr:hover{border-color:var(--color-accent);color:var(--color-accent-ink);text
   .stat{border-left:0;border-top:1px solid var(--color-line)}
   .stat:first-child{border-top:0}
 }
+
+/* lightning faucet */
+.lngrid{display:grid;grid-template-columns:1.5fr 1fr;gap:var(--space-5);align-items:start}
+.lnnode{text-align:center}
+.lnnode .qr{display:inline-block;background:#fff;border:1px solid var(--color-line);border-radius:var(--radius-sm);padding:var(--space-2);line-height:0;margin-bottom:var(--space-3)}
+.lnnode .qr img{width:126px;height:126px;display:block}
+.lnbadge{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:var(--text-xs);font-weight:600;color:var(--color-accent-ink);background:var(--color-accent-wash);border:1px solid color-mix(in oklch,var(--color-accent) 30%,var(--color-line));padding:1px 8px;border-radius:20px}
+@media(max-width:860px){.lngrid{grid-template-columns:minmax(0,1fr)}}
 </style>
 </head>
 <body>
@@ -248,6 +256,38 @@ a.addr:hover{border-color:var(--color-accent);color:var(--color-accent-ink);text
     </div>
   </div>
 
+  {% if ln_enabled %}
+  <!-- lightning faucet -->
+  <section class="txwrap" id="lightning">
+    <div class="txhead">
+      <h2 data-en="⚡ Lightning testnet3" data-zh="⚡ 闪电网络 testnet3"></h2>
+      <span class="live" data-en="instant · off-chain" data-zh="链下 · 即时到账"></span>
+    </div>
+    <div class="card">
+      <div class="lngrid">
+        <div>
+          <label class="field" for="lnuri" data-en="Your Lightning node URI" data-zh="你的闪电节点 URI"></label>
+          <input id="lnuri" type="text" placeholder="03abc...@1.2.3.4:9735" autocomplete="off" spellcheck="false">
+          <div class="hp" aria-hidden="true"><label>Website</label><input type="text" id="lnhp" name="{{ honeypot_field }}" tabindex="-1" autocomplete="off"></div>
+          <button id="lnbtn" class="go" onclick="lnClaim()" data-en="Open a channel to me" data-zh="给我开一条通道"></button>
+          <div id="lnbar" class="bar"><i id="lnbarfill"></i></div>
+          <div id="lnmsg" class="msg"></div>
+          <p class="hint"
+             data-en="The faucet opens a <b>{{ '{:,}'.format(ln_capacity_sat) }} sat</b> channel to your node and pushes <b>{{ '{:,}'.format(ln_push_sat) }} sat</b> to you — instant & spendable. One channel per node per week; same in-browser PoW and daily limits as the on-chain faucet."
+             data-zh="水龙头会给你的节点开一条 <b>{{ '{:,}'.format(ln_capacity_sat) }} sat</b> 的通道,并推送 <b>{{ '{:,}'.format(ln_push_sat) }} sat</b> 给你——即时、可花。每个节点每周一条;浏览器工作量证明和每日限制,与链上水龙头一致。"></p>
+        </div>
+        <div class="lnnode">
+          {% if ln_qr %}<div class="qr"><img src="{{ ln_qr }}" alt="faucet node"></div>{% endif %}
+          <span class="lnbadge">⚡ SATLOOT-faucet</span>
+          <p class="hint" style="margin:var(--space-3) 0 var(--space-2)"
+             data-en="Or connect to the faucet node first:" data-zh="或者先连上水龙头节点:"></p>
+          <a class="addr" href="#" style="font-size:var(--text-xs)">{{ ln_node_uri }}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
   <!-- full-width on-chain transactions -->
   <section class="txwrap" id="txs">
     <div class="txhead">
@@ -301,6 +341,7 @@ function applyI18n(){
   document.documentElement.lang = LANG;
   try{ localStorage.setItem('faucet_lang', LANG); }catch(e){}
   renderTxs(); renderAbal();
+  if(typeof lnCheck==='function' && document.getElementById('lnbtn')) lnCheck();
 }
 function setLang(l){ LANG = (l==='zh')?'zh':'en'; applyI18n(); }
 
@@ -421,6 +462,51 @@ async function claim(){
 }
 function show(ok,html){ const m=document.getElementById('msg'); m.className='msg '+(ok?'ok':'err'); m.innerHTML=html; m.style.display='block'; }
 
+/* ---- lightning channel request ---- */
+function lnshow(ok,html){ const m=document.getElementById('lnmsg'); if(!m) return; m.className='msg '+(ok?'ok':'err'); m.innerHTML=html; m.style.display='block'; }
+
+/* Check backend readiness up front so nobody grinds PoW just to be told the node
+   is still syncing; re-checks periodically so the section self-activates. */
+let LN_READY=false;
+async function lnCheck(){
+  const btn=document.getElementById('lnbtn'); if(!btn) return;
+  try{
+    const d=await (await fetch('/api/lninfo')).json();
+    LN_READY=!!d.synced;
+  }catch(e){ LN_READY=false; }
+  btn.disabled=!LN_READY;
+  btn.textContent=LN_READY
+    ? (LANG==='zh'?'给我开一条通道':'Open a channel to me')
+    : (LANG==='zh'?'⏳ 节点同步中,即将开放':'⏳ Node still syncing — coming soon');
+}
+async function lnClaim(){
+  const uri=document.getElementById('lnuri').value.trim();
+  const hp=document.getElementById('lnhp').value;
+  const btn=document.getElementById('lnbtn');
+  const bar=document.getElementById('lnbar'), fill=document.getElementById('lnbarfill');
+  const m=document.getElementById('lnmsg'); m.className='msg'; m.style.display='none';
+  if(!uri){ lnshow(false, LANG==='zh'?'请先填写你的节点 URI(pubkey@host:port)。':'Enter your node URI (pubkey@host:port) first.'); return; }
+  btn.disabled=true; btn.textContent=T.solving[LANG];
+  bar.style.display='block'; fill.style.width='0%';
+  try{
+    const cr=await (await fetch('/api/challenge')).json();   // own challenge, don't consume the on-chain one
+    const nonce=await solvePow(cr.token,cr.bits,p=>{fill.style.width=(p*100).toFixed(0)+'%';});
+    fill.style.width='100%'; btn.textContent=T.sending[LANG];
+    const body=new URLSearchParams();
+    body.set('node_uri',uri); body.set('token',cr.token); body.set('sig',cr.sig);
+    body.set('nonce',String(nonce)); body.set('lang',LANG); body.set('{{ honeypot_field }}',hp);
+    const r=await fetch('/api/lnclaim',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+    const d=await r.json();
+    if(d.ok){
+      lnshow(true,(LANG==='zh'?'✅ 已给你的节点开通道,推送 '+d.push_sat+' sat。 ':'✅ Channel opened, '+d.push_sat+' sat pushed. ')
+        +'<a href="'+d.explorer+'" target="_blank" rel="noopener">'+T.txlbl[LANG]+' →</a>');
+    }else{ lnshow(false, d.error||T.neterr[LANG]); }
+  }catch(e){ lnshow(false,T.neterr[LANG]); }
+  bar.style.display='none'; btn.disabled=false;
+  btn.textContent=(LANG==='zh'?'给我开一条通道':'Open a channel to me');
+  lnCheck();
+}
+
 // close faucet dropdown on outside click
 document.addEventListener('click', e=>{
   document.querySelectorAll('details.fdrop[open]').forEach(d=>{ if(!d.contains(e.target)) d.removeAttribute('open'); });
@@ -431,6 +517,10 @@ document.addEventListener('click', e=>{
   if(!l){ l=(navigator.language||'en').toLowerCase().startsWith('zh')?'zh':'en'; }
   setLang(l);
   loadTxs();
+  if(document.getElementById('lnbtn')){
+    lnCheck();
+    setInterval(lnCheck, 60000);   // node is syncing — flip to live on its own
+  }
 })();
 </script>
 </body>

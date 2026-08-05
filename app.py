@@ -23,7 +23,8 @@ from bit.transaction import address_to_scriptpubkey
 BASE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE, "config.json")
 DB_PATH = os.path.join(BASE, "faucet.db")
-LOCK_PATH = os.path.join(BASE, "payout.lock")   # cross-process payout mutex
+LOCK_PATH = os.path.join(BASE, "payout.lock")      # cross-process on-chain payout mutex
+LN_LOCK_PATH = os.path.join(BASE, "ln.lock")       # separate mutex for Lightning opens
 
 CN_TZ = timezone(timedelta(hours=8))   # daily cap resets at 00:00 Beijing time (UTC+8)
 
@@ -55,6 +56,20 @@ DEFAULT_CONFIG = {
     "min_reserve_sat": 0,
     "pushplus_token": "",                  # WeChat push (PushPlus); set in config.json
     "site_url": "https://satloot.com",
+    # ---- Lightning faucet (talks to LND on the node server over REST) ----
+    "ln_node_uri": "039e7672537f2c742141dfadfd1b2e9a4871f9c064873347ab0fc0671f73f093f8@172.96.9.5:9735",
+    "lnd_rest_url": "https://172.96.9.5:8080",       # LND REST (only reachable from this server's IP)
+    "lnd_macaroon_path": "/opt/btc_faucet/lnd/admin.macaroon",  # copied from the LND server
+    "lnd_tls_cert_path": "/opt/btc_faucet/lnd/tls.cert",        # copied from the LND server
+    "ln_node_host": "172.96.9.5:9735",     # host:port fallback if LND getinfo returns no uris
+    "ln_channel_capacity_sat": 250000,
+    "ln_push_sat": 100000,
+    "ln_fee_sat_per_vbyte": 1,
+    "ln_node_cooldown_sec": 604800,        # one channel per node per week
+    "ln_ip_cooldown_sec": 86400,
+    "ln_daily_channel_cap": 20,
+    "ln_min_reserve_sat": 2000000,
+    "ln_max_pending": 5,
 }
 
 # ---------------------------------------------------------------- i18n (server messages)
@@ -78,6 +93,17 @@ MSG = {
  "low":         {"en": "Faucet balance is too low, please wait for a refill.", "zh": "水龙头余额不足,请等待管理员补充。"},
  "pending":     {"en": "Faucet funds are still confirming on-chain — please try again in a few minutes.", "zh": "水龙头资金到账确认中,请几分钟后再试。"},
  "send_fail":   {"en": "Send failed: {e}", "zh": "发送失败:{e}"},
+ "ln_off":      {"en": "Lightning faucet is not available right now.", "zh": "闪电水龙头暂不可用。"},
+ "ln_bad_uri":  {"en": "Enter a valid node URI: <pubkey>@<host>:<port>", "zh": "请输入有效的节点 URI:<pubkey>@<host>:<port>"},
+ "ln_node_cd":  {"en": "This node already got a channel. Try again in {h}h.", "zh": "该节点已开过通道,请 {h} 小时后再来。"},
+ "ln_ip_cd":    {"en": "Too many Lightning requests from your IP. Try again in {m} min.", "zh": "你的 IP 闪电请求太频繁,请 {m} 分钟后再来。"},
+ "ln_daily":    {"en": "Today's Lightning channel quota is used up.", "zh": "今日闪电通道额度已用完。"},
+ "ln_syncing":  {"en": "Faucet Lightning node is still syncing, try again later.", "zh": "水龙头闪电节点还在同步,请稍后再试。"},
+ "ln_busy":     {"en": "Too many pending channels, please try again soon.", "zh": "待确认通道过多,请稍后再试。"},
+ "ln_low":      {"en": "Lightning faucet is low on funds, please wait for a refill.", "zh": "闪电水龙头余额不足,请等待补充。"},
+ "ln_fail":     {"en": "Channel open failed: {e}", "zh": "开通道失败:{e}"},
+ "ln_unreachable": {"en": "Could not reach your node. Check it is online and reachable from the internet at that host:port.",
+                    "zh": "连不上你的节点。请确认它在线,且该 host:port 可从公网访问。"},
 }
 
 def req_lang():
@@ -126,6 +152,88 @@ def make_qr(addr):
         return None
 RETURN_QR = make_qr(CONFIG["return_address"])
 
+# ---------------------------------------------------------------- Lightning (LND over REST)
+try:
+    from lnd_client import LNDClient, LNDError
+except Exception:                       # lnd_client missing -> LN simply stays "coming soon"
+    LNDClient = None
+    class LNDError(Exception):
+        pass
+
+LN_NODE_URI = CONFIG.get("ln_node_uri", "")
+LN_ENABLED = bool(LN_NODE_URI)
+def make_ln_qr(uri):
+    try:
+        import segno
+        return segno.make(uri, error="m").svg_data_uri(
+            scale=5, border=2, dark="#1a1a2e", light="#ffffff")
+    except Exception:
+        return None
+LN_QR = make_ln_qr(LN_NODE_URI) if LN_NODE_URI else None
+
+_LND = None
+def get_lnd():
+    """Lazy LND REST client. Raises LNDError when the backend isn't wired up yet
+    (no lnd_client, no rest_url, or macaroon/tls not copied to this server)."""
+    global _LND
+    if _LND is not None:
+        return _LND
+    if LNDClient is None or not CONFIG.get("lnd_rest_url"):
+        raise LNDError("LN backend not configured")
+    _LND = LNDClient(CONFIG["lnd_rest_url"],
+                     macaroon_path=CONFIG.get("lnd_macaroon_path") or None,
+                     tls_cert_path=CONFIG.get("lnd_tls_cert_path") or None)
+    return _LND
+
+def valid_node_uri(uri):
+    """Parse '<66-hex-pubkey>@<host>:<port>'. Returns (pubkey, host) or None.
+
+    The host is handed to our own LND to dial, so it must not be usable as a probe
+    of the node server's internal network: literal loopback/private/link-local/
+    reserved addresses are rejected, and the port must be a plausible number. Tor
+    .onion hosts are allowed (LND dials those through its own proxy, not our LAN);
+    DNS names can't be resolved here without leaking the lookup, so they're taken
+    as-is — LND itself refuses to route to non-routable peers.
+    """
+    if not uri or "@" not in uri:
+        return None
+    pub, host = uri.split("@", 1)
+    pub = pub.strip().lower(); host = host.strip()
+    if len(pub) != 66 or any(c not in "0123456789abcdef" for c in pub) or not host:
+        return None
+    if len(host) > 255:
+        return None
+
+    # split host:port, tolerating [v6]:port
+    if host.startswith("["):
+        end = host.find("]")
+        if end < 0:
+            return None
+        addr, rest = host[1:end], host[end + 1:]
+        if not rest.startswith(":"):
+            return None
+        port = rest[1:]
+    else:
+        if host.count(":") != 1:
+            return None
+        addr, port = host.rsplit(":", 1)
+    if not addr or not port.isdigit() or not (1 <= int(port) <= 65535):
+        return None
+
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        # hostname: allow, but keep it to sane characters
+        if addr.endswith(".onion"):
+            return pub, host
+        if any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-" for c in addr):
+            return None
+        return pub, host
+    if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+            or ip.is_multicast or ip.is_unspecified):
+        return None
+    return pub, host
+
 # ---------------------------------------------------------------- WeChat push (PushPlus)
 def wechat_push(title, content):
     token = CONFIG.get("pushplus_token")
@@ -143,10 +251,34 @@ def wechat_push(title, content):
 
 app = Flask(__name__)
 
+@app.errorhandler(Exception)
+def _json_errors(e):
+    """Never let an unexpected exception reach an API caller as an HTML 500 —
+    the front-end parses JSON and would otherwise show a generic network error.
+    HTTP errors (404 etc.) keep their own status; anything else degrades to a
+    'busy' 503 so a transient hiccup reads as back-pressure, not breakage."""
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        if request.path.startswith("/api/"):
+            return jsonify(ok=False, error=e.description), e.code
+        return e
+    app.logger.exception("unhandled error on %s", request.path)
+    if request.path.startswith("/api/"):
+        return jsonify(ok=False, error=M(req_lang(), "busy")), 503
+    raise e
+
 # ---------------------------------------------------------------- db
 def get_db():
-    con = sqlite3.connect(DB_PATH)
+    # A generous busy timeout keeps a transient writer collision waiting instead of
+    # raising "database is locked" (which would surface as an HTTP 500); WAL lets
+    # readers proceed while a writer holds the lock.
+    con = sqlite3.connect(DB_PATH, timeout=30)
     con.row_factory = sqlite3.Row
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA busy_timeout=30000")
+    except sqlite3.Error:
+        pass
     return con
 
 def init_db(*_a):
@@ -164,6 +296,11 @@ def init_db(*_a):
     CREATE TABLE IF NOT EXISTS bans(ip TEXT PRIMARY KEY, until INTEGER);
     CREATE TABLE IF NOT EXISTS attempts(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER);
     CREATE TABLE IF NOT EXISTS alerts(kind TEXT PRIMARY KEY, ts INTEGER);
+    CREATE TABLE IF NOT EXISTS ln_claims(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pubkey TEXT, ip TEXT, subnet TEXT, txid TEXT, ts INTEGER);
+    CREATE INDEX IF NOT EXISTS idx_lnpub ON ln_claims(pubkey, ts);
+    CREATE INDEX IF NOT EXISTS idx_lnip  ON ln_claims(ip, ts);
     """)
     con.commit(); con.close()
 
@@ -182,6 +319,32 @@ def maybe_alert(con, kind, cooldown, title, content):
 # ---------------------------------------------------------------- payout mutex
 class PayoutBusy(Exception):
     """Raised when the payout lock can't be acquired within the timeout."""
+
+@contextmanager
+def _file_lock(path, timeout_sec):
+    con = sqlite3.connect(path, timeout=timeout_sec)
+    try:
+        try:
+            con.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise PayoutBusy()
+        try:
+            yield
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+    finally:
+        con.close()
+
+@contextmanager
+def ln_lock(timeout_sec=20):
+    """Serialize Lightning channel opens among themselves. Deliberately a DIFFERENT
+    lock file from payout_lock: LN spends the LND node's own on-chain wallet, a
+    separate UTXO set from the bit hot wallet, so sharing one lock would buy no
+    safety while letting a slow channel open (up to ~90s) starve on-chain claims."""
+    with _file_lock(LN_LOCK_PATH, timeout_sec):
+        yield
 
 @contextmanager
 def payout_lock(timeout_sec=25):
@@ -290,6 +453,12 @@ def verify_challenge(con, token, sig, nonce):
         return False, "bad_pow"
     try:
         con.execute("INSERT INTO used_tokens(jti, exp) VALUES(?,?)", (jti, exp))
+        # Commit right away: leaving this write uncommitted would hold a RESERVED
+        # lock on faucet.db across the slow broadcast / LND calls further down, and
+        # a concurrent request's first write would then fail with "database is
+        # locked" (an uncaught 500). Committing here also makes the single-use
+        # token durable the moment it is spent.
+        con.commit()
     except sqlite3.IntegrityError:
         return False, "token_used"
     return True, None
@@ -334,6 +503,11 @@ def index():
         honeypot_field=CONFIG["honeypot_field"],
         challenge=make_challenge(),
         return_qr=RETURN_QR,
+        ln_enabled=LN_ENABLED,
+        ln_node_uri=LN_NODE_URI,
+        ln_qr=LN_QR,
+        ln_capacity_sat=CONFIG["ln_channel_capacity_sat"],
+        ln_push_sat=CONFIG["ln_push_sat"],
         recent=recent)
 
 @app.route("/api/challenge")
@@ -526,6 +700,150 @@ def claim():
                 con.execute("DELETE FROM attempts WHERE ts < ?", (now - 120,))
                 con.commit()
                 return jsonify(ok=True, txid=txid, amount_sat=payout,
+                               explorer=f"https://mempool.space/testnet/tx/{txid}")
+        except PayoutBusy:
+            return jsonify(ok=False, error=M(lang, "busy")), 503
+    finally:
+        con.close()
+
+# ---------------------------------------------------------------- Lightning routes
+@app.route("/api/lninfo")
+def lninfo():
+    """Faucet LN node URI + whether the backend can actually serve a request.
+
+    'synced' means the node is ready AND has confirmed coins to fund a channel —
+    an unconfirmed deposit would otherwise leave the button enabled while every
+    click failed on insufficient funds."""
+    out = {"enabled": LN_ENABLED, "node_uri": LN_NODE_URI, "synced": False,
+           "capacity_sat": CONFIG["ln_channel_capacity_sat"],
+           "push_sat": CONFIG["ln_push_sat"]}
+    try:
+        c = get_lnd()
+        if bool(c.getinfo().get("synced_to_chain")):
+            bal = int(c.wallet_balance().get("confirmed_balance") or 0)
+            out["synced"] = bal >= (CONFIG["ln_channel_capacity_sat"]
+                                    + CONFIG["ln_min_reserve_sat"])
+    except Exception:
+        pass
+    return jsonify(out)
+
+@app.route("/api/lnclaim", methods=["POST"])
+def lnclaim():
+    """Open a channel to the requester's node and push sats. Reuses the on-chain
+    faucet's PoW / cooldown / subnet / ban machinery. Degrades gracefully to a
+    'still syncing' message whenever LND isn't reachable or not yet synced, so the
+    page can go live before the backend is ready."""
+    lang = req_lang()
+    con = get_db()
+    try:
+        ip = client_ip()
+        now = int(time.time())
+
+        con.execute("INSERT INTO attempts(ts) VALUES(?)", (now,)); con.commit()
+        rpm = con.execute("SELECT COUNT(*) c FROM attempts WHERE ts>=?", (now - 60,)).fetchone()["c"]
+        if rpm > CONFIG["global_rpm"]:
+            return jsonify(ok=False, error=M(lang, "busy")), 503
+        if is_banned(con, ip):
+            return jsonify(ok=False, error=M(lang, "banned")), 429
+
+        f = request.form
+        uri = (f.get("node_uri") or "").strip()
+        honey = (f.get(CONFIG["honeypot_field"]) or "").strip()
+        token = f.get("token"); sig = f.get("sig"); nonce = f.get("nonce")
+
+        if honey:
+            add_strike(con, ip)
+            return jsonify(ok=False, error=M(lang, "rejected")), 400
+
+        ok, err = verify_challenge(con, token, sig, nonce)
+        if not ok:
+            con.commit(); add_strike(con, ip)
+            return jsonify(ok=False, error=M(lang, err)), 400
+
+        parsed = valid_node_uri(uri)
+        if not parsed:
+            con.commit(); add_strike(con, ip)
+            return jsonify(ok=False, error=M(lang, "ln_bad_uri")), 400
+        pubkey, host = parsed
+
+        # backend readiness gate — reachable AND synced, else degrade politely
+        try:
+            if not bool(get_lnd().getinfo().get("synced_to_chain")):
+                con.commit()
+                return jsonify(ok=False, error=M(lang, "ln_syncing")), 503
+        except Exception:
+            con.commit()
+            return jsonify(ok=False, error=M(lang, "ln_syncing")), 503
+
+        # serialize channel opens among themselves (own lock — see ln_lock)
+        try:
+            with ln_lock(timeout_sec=20):
+                # Cooldowns/caps count only channels that actually opened (txid<>''):
+                # a failed dial is punished with a strike instead, so an offline peer
+                # doesn't lock its own pubkey out for a week.
+                row = con.execute("SELECT ts FROM ln_claims WHERE pubkey=? AND txid<>'' "
+                                  "ORDER BY id DESC LIMIT 1", (pubkey,)).fetchone()
+                if row and now - row["ts"] < CONFIG["ln_node_cooldown_sec"]:
+                    w = CONFIG["ln_node_cooldown_sec"] - (now - row["ts"]); con.commit()
+                    return jsonify(ok=False, error=M(lang, "ln_node_cd", h=w // 3600)), 429
+
+                row = con.execute("SELECT ts FROM ln_claims WHERE ip=? AND txid<>'' "
+                                  "ORDER BY id DESC LIMIT 1", (ip,)).fetchone()
+                if row and now - row["ts"] < CONFIG["ln_ip_cooldown_sec"]:
+                    w = CONFIG["ln_ip_cooldown_sec"] - (now - row["ts"]); con.commit()
+                    return jsonify(ok=False, error=M(lang, "ln_ip_cd", m=w // 60)), 429
+
+                snet = subnet_of(ip)
+                scnt = con.execute("SELECT COUNT(*) c FROM ln_claims WHERE subnet=? AND txid<>'' "
+                                   "AND ts>=?", (snet, now - CONFIG["subnet_window_sec"])).fetchone()["c"]
+                if scnt >= CONFIG["subnet_max_per_window"]:
+                    con.commit()
+                    return jsonify(ok=False, error=M(lang, "subnet")), 429
+
+                day = con.execute("SELECT COUNT(*) c FROM ln_claims WHERE txid<>'' AND ts>=?",
+                                  (day_start_ts(),)).fetchone()["c"]
+                if day >= CONFIG["ln_daily_channel_cap"]:
+                    con.commit()
+                    return jsonify(ok=False, error=M(lang, "ln_daily")), 503
+
+                try:
+                    c = get_lnd()
+                    if c.num_pending_open() >= CONFIG["ln_max_pending"]:
+                        con.commit()
+                        return jsonify(ok=False, error=M(lang, "ln_busy")), 503
+                    bal = int(c.wallet_balance().get("confirmed_balance") or 0)
+                    if bal < CONFIG["ln_channel_capacity_sat"] + CONFIG["ln_min_reserve_sat"]:
+                        maybe_alert(con, "ln_empty", 6 * 3600,
+                                    "⚠️ Satloot 闪电水龙头余额不足",
+                                    f"## ⚡ LND 链上余额不足\n\n当前 **{bal/1e8:.8f} tBTC**,不够开通道。\n\n"
+                                    f"请给 LND 充值。\n\n{CONFIG.get('site_url','')}")
+                        con.commit()
+                        return jsonify(ok=False, error=M(lang, "ln_low")), 503
+                    c.connect_peer(pubkey, host)
+                    txid = c.open_channel(pubkey, CONFIG["ln_channel_capacity_sat"],
+                                          CONFIG["ln_push_sat"], CONFIG["ln_fee_sat_per_vbyte"])
+                except LNDError as e:
+                    # Count the failed attempt so repeated dials are bounded by the
+                    # same per-IP/subnet limits as successes (an empty txid marks it
+                    # as "no channel"), and never echo LND's raw dial error back —
+                    # that would turn the faucet into a port-scan oracle.
+                    app.logger.warning("ln open failed for %s@%s: %s", pubkey[:12], host, e)
+                    con.execute("INSERT INTO ln_claims(pubkey, ip, subnet, txid, ts) VALUES(?,?,?,?,?)",
+                                (pubkey, ip, snet, "", now))
+                    con.commit()
+                    # A failure must not burn the week-long per-node cooldown (the
+                    # peer may simply be offline), but repeated dials must still be
+                    # bounded — a strike feeds the existing auto-ban.
+                    add_strike(con, ip)
+                    return jsonify(ok=False, error=M(lang, "ln_unreachable"))
+
+                con.execute("INSERT INTO ln_claims(pubkey, ip, subnet, txid, ts) VALUES(?,?,?,?,?)",
+                            (pubkey, ip, snet, txid, now))
+                con.execute("DELETE FROM used_tokens WHERE exp < ?", (now,))
+                con.execute("DELETE FROM attempts WHERE ts < ?", (now - 120,))
+                con.commit()
+                return jsonify(ok=True, txid=txid, push_sat=CONFIG["ln_push_sat"],
+                               capacity_sat=CONFIG["ln_channel_capacity_sat"],
                                explorer=f"https://mempool.space/testnet/tx/{txid}")
         except PayoutBusy:
             return jsonify(ok=False, error=M(lang, "busy")), 503
