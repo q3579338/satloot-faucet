@@ -1,0 +1,16 @@
+# Satloot Bitcoin Testnet3 Faucet
+
+> Satloot 比特币 testnet3 测试网水龙头，为开发者提供测试币领取入口、闪电网络通道水龙头及中英文接口文档。
+
+本站服务于比特币开发与测试。testnet3 测试币没有真实货币价值；不是主网比特币发放或投资产品。可用余额、领取额度、冷却时间与闪电通道开放情况以页面当前状态为准。
+
+## 公开页面
+
+- [中文水龙头](https://faucet.satloot.com/): 测试网用途、领取入口、额度与服务状态。
+- [English faucet](https://faucet.satloot.com/en/): English Bitcoin testnet3 and Lightning faucet interface.
+- [中文接口文档](https://faucet.satloot.com/api/): 面向开发者的公开接口说明与示例。
+- [English API documentation](https://faucet.satloot.com/en/api/): Public documentation for the testnet faucet API.
+
+## 相关入口
+
+- [Satloot 项目总览](https://satloot.com/): Satloot 旗下公开项目。

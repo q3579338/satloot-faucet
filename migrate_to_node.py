@@ -77,6 +77,7 @@ def main():
     for local, remote in [("app.py", f"{REMOTE}/app.py"),
                           ("lnd_client.py", f"{REMOTE}/lnd_client.py"),
                           ("requirements.txt", f"{REMOTE}/requirements.txt"),
+                          ("llms.txt", f"{REMOTE}/llms.txt"),
                           (os.path.join("templates", "index.html"), f"{REMOTE}/templates/index.html")]:
         print("  put", local, flush=True)
         sftp.put(os.path.join(APP_DIR, local), remote)
@@ -155,7 +156,14 @@ WantedBy=multi-user.target
 {realip}
     real_ip_header CF-Connecting-IP;
 
+    location = /llms.txt {{
+        alias {REMOTE}/llms.txt;
+        default_type text/plain;
+        charset utf-8;
+    }}
+
     location / {{
+        add_header Link '</llms.txt>; rel="describedby"' always;
         proxy_pass http://127.0.0.1:8811;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;

@@ -64,6 +64,7 @@ def main():
     put(os.path.join(APP_DIR, "app.py"), f"{REMOTE}/app.py")
     put(os.path.join(APP_DIR, "templates", "index.html"), f"{REMOTE}/templates/index.html")
     put(os.path.join(APP_DIR, "requirements.txt"), f"{REMOTE}/requirements.txt")
+    put(os.path.join(APP_DIR, "llms.txt"), f"{REMOTE}/llms.txt")
 
     print("== 3. python venv + deps ==")
     run(f"cd {REMOTE} && python3 -m venv venv && ./venv/bin/pip install -q --upgrade pip && ./venv/bin/pip install -q -r requirements.txt && echo installed")
@@ -105,7 +106,14 @@ WantedBy=multi-user.target
 {realip}
     real_ip_header CF-Connecting-IP;
 
+    location = /llms.txt {{
+        alias {REMOTE}/llms.txt;
+        default_type text/plain;
+        charset utf-8;
+    }}
+
     location / {{
+        add_header Link '</llms.txt>; rel="describedby"' always;
         proxy_pass http://127.0.0.1:8811;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;

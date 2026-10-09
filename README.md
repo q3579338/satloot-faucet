@@ -57,6 +57,13 @@ Run the app on `127.0.0.1:8811` and put nginx / Caddy / Apache in front. HTTPS v
 Let's Encrypt or Cloudflare. `deploy.py` is a one-shot nginx + certbot deployer for
 reference.
 
+The public [`llms.txt`](llms.txt) describes the live site's purpose and public pages.
+Both `deploy.py` and `migrate_to_node.py` copy it to `/opt/btc_faucet/llms.txt`
+and serve `/llms.txt` directly through nginx as UTF-8 plain text. Proxied pages
+advertise it with a `Link: </llms.txt>; rel="describedby"` response header, and
+the HTML template includes the matching discovery link. Keep this manifest
+aligned with the public pages when changing the deployment.
+
 The per-IP / per-subnet limits are only as trustworthy as the client IP the app
 sees, so make sure your proxy sets it correctly:
 
